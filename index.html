@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>旅程帳 · 家庭旅行記帳</title>
+<meta name="theme-color" content="#2C3E35">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="旅程帳">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700;900&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --cream:#FBF6EF;
+    --cream-2:#F3ECDF;
+    --ink:#2C3E35;
+    --ink-soft:#3F5347;
+    --clay:#C17654;
+    --clay-soft:#E3B79A;
+    --mist:#5B7C8D;
+    --mist-soft:#AFC4CD;
+    --warmgray:#8B8378;
+    --line:#DCD2BE;
+    --danger:#B24C3A;
+    --paper-shadow: 0 2px 0 rgba(44,62,53,0.06), 0 8px 24px rgba(44,62,53,0.08);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    margin:0;
+    font-family:'Noto Sans TC', sans-serif;
+    background:var(--cream);
+    color:var(--ink);
+    overscroll-behavior-y:none;
+    -webkit-font-smoothing:antialiased;
+  }
+  #app{
+    max-width:520px;
+    margin:0 auto;
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+    position:relative;
+    background:
+      radial-gradient(circle at 10% 5%, rgba(193,118,84,0.06), transparent 40%),
+      radial-gradient(circle at 90% 15%, rgba(91,124,141,0.07), transparent 40%),
+      var(--cream);
+  }
+
+  /* ---------- Header ---------- */
+  .topbar{
+    padding:calc(22px + env(safe-area-inset-top)) 20px 14px;
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    border-bottom:1px solid var(--line);
+  }
+  .topbar .brand{
+    font-family:'Noto Serif TC', serif;
+    font-weight:900;
+    font-size:22px;
+    letter-spacing:1px;
+    color:var(--ink);
+  }
+  .topbar .brand span{color:var(--clay);}
+  .topbar .trip-select{
+    font-size:12.5px;
+    color:var(--warmgray);
+    border:1px solid var(--line);
+    background:#fff;
+    border-radius:20px;
+    padding:6px 12px;
+    display:flex;
+    align-items:center;
+    gap:6px;
+    max-width:150px;
+  }
+  .topbar select{
+    border:none;
+    background:transparent;
+    font-family:inherit;
+    font-size:12.5px;
+    color:var(--ink);
+    max-width:110px;
+    outline:none;
+  }
+
+  /* ---------- Main scroll area ---------- */
+  main{
+    flex:1;
+    overflow-y:auto;
+    padding:18px 18px 100px;
+  }
+  .screen{display:none;}
+  .screen.active{display:block; animation:fadeUp .32s ease;}
+  @keyframes fadeUp{
+    from{opacity:0; transform:translateY(8px);}
+    to{opacity:1; transform:translateY(0);}
+  }
+
+  h2.section-title{
+    font-family:'Noto Serif TC', serif;
+    font-size:15px;
+    font-weight:700;
+    color:var(--ink-soft);
+    margin:26px 0 12px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  h2.section-title:first-child{margin-top:0;}
+  h2.section-title::before{
+    content:'';
+    width:14px; height:1px;
+    background:var(--clay);
+    display:inline-block;
+  }
+
+  /* ---------- Dashboard ---------- */
+  .hero-card{
+    background:var(--ink);
+    color:var(--cream);
+    border-radius:18px;
+    padding:22px 20px;
+    position:relative;
+    overflow:hidden;
+    box-shadow:var(--paper-shadow);
+  }
+  .hero-card::after{
+    content:'';
+    position:absolute;
+    right:-30px; top:-30px;
+    width:140px; height:140px;
+    border-radius:50%;
+    background:radial-gradient(circle, rgba(193,118,84,0.35), transparent 70%);
+  }
+  .hero-card .label{
+    font-size:11.5px;
+    letter-spacing:1.5px;
+    text-transform:uppercase;
+    color:var(--clay-soft);
+    opacity:0.9;
+  }
+  .hero-card .amount{
+    font-family:'Noto Serif TC', serif;
+    font-size:38px;
+    font-weight:900;
+    margin:6px 0 2px;
+    position:relative;
+    z-index:1;
+  }
+  .hero-card .sub{
+    font-size:12.5px;
+    color:rgba(251,246,239,0.65);
+    position:relative;
+    z-index:1;
+  }
+  .stat-row{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:10px;
+    margin-top:16px;
+  }
+  .stat-box{
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:14px 16px;
+  }
+  .stat-box .n{
+    font-family:'Noto Serif TC', serif;
+    font-size:20px;
+    font-weight:700;
+    color:var(--ink);
+  }
+  .stat-box .l{
+    font-size:11.5px;
+    color:var(--warmgray);
+    margin-top:2px;
+  }
+
+  .cat-bars{margin-top:6px;}
+  .cat-bar-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:9px 0;
+    border-bottom:1px dashed var(--line);
+  }
+  .cat-bar-row:last-child{border-bottom:none;}
+  .cat-icon{
+    width:30px; height:30px;
+    border-radius:9px;
+    display:flex; align-items:center; justify-content:center;
+    font-size:15px;
+    flex-shrink:0;
+  }
+  .cat-bar-row .info{flex:1; min-width:0;}
+  .cat-bar-row .info .top{
+    display:flex; justify-content:space-between;
+    font-size:13px; margin-bottom:4px;
+  }
+  .cat-bar-row .info .top .amt{font-weight:700; color:var(--ink);}
+  .bar-track{
+    height:5px; background:var(--cream-2);
+    border-radius:3px; overflow:hidden;
+  }
+  .bar-fill{height:100%; border-radius:3px;}
+
+  .who-row{
+    display:flex;
+    gap:10px;
+    margin-top:6px;
+    overflow-x:auto;
+    padding-bottom:4px;
+  }
+  .who-chip{
+    flex-shrink:0;
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:12px 16px;
+    min-width:92px;
+    text-align:center;
+  }
+  .who-chip .avatar{
+    width:34px; height:34px;
+    border-radius:50%;
+    margin:0 auto 6px;
+    display:flex; align-items:center; justify-content:center;
+    color:#fff; font-weight:700; font-size:13px;
+    font-family:'Noto Serif TC', serif;
+  }
+  .who-chip .name{font-size:12px; color:var(--ink-soft);}
+  .who-chip .amt{font-size:13px; font-weight:700; margin-top:2px;}
+
+  /* ---------- Ledger (記帳) ---------- */
+  .ledger-day{margin-bottom:20px;}
+  .ledger-day .date-head{
+    font-size:12px;
+    color:var(--warmgray);
+    display:flex;
+    justify-content:space-between;
+    margin-bottom:8px;
+    padding:0 2px;
+  }
+  .ledger-day .date-head .dsum{color:var(--ink); font-weight:700;}
+  .expense-card{
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:13px 14px;
+    display:flex;
+    align-items:center;
+    gap:12px;
+    margin-bottom:9px;
+    box-shadow:var(--paper-shadow);
+  }
+  .expense-card .cat-icon{width:38px; height:38px; font-size:18px; border-radius:11px;}
+  .expense-card .mid{flex:1; min-width:0;}
+  .expense-card .mid .t1{font-size:14.5px; font-weight:700; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .expense-card .mid .t2{font-size:11.5px; color:var(--warmgray); margin-top:2px;}
+  .expense-card .right{text-align:right; flex-shrink:0;}
+  .expense-card .right .amt{font-family:'Noto Serif TC', serif; font-weight:700; font-size:15.5px; color:var(--ink);}
+  .expense-card .right .who{font-size:10.5px; color:var(--clay); margin-top:2px;}
+
+  .empty-state{
+    text-align:center;
+    padding:50px 20px;
+    color:var(--warmgray);
+  }
+  .empty-state .ico{font-size:34px; margin-bottom:10px;}
+  .empty-state .t{font-size:14px; font-weight:700; color:var(--ink-soft); margin-bottom:4px;}
+  .empty-state .d{font-size:12.5px;}
+
+  /* ---------- Itinerary (行程) ---------- */
+  .itin-day-tab{
+    display:flex; gap:8px; overflow-x:auto;
+    padding-bottom:6px; margin-bottom:18px;
+  }
+  .itin-day-tab button{
+    flex-shrink:0;
+    font-family:'Noto Serif TC', serif;
+    font-weight:700;
+    font-size:13px;
+    padding:9px 15px;
+    border-radius:20px;
+    border:1px solid var(--line);
+    background:#fff;
+    color:var(--ink-soft);
+  }
+  .itin-day-tab button.active{
+    background:var(--ink);
+    color:var(--cream);
+    border-color:var(--ink);
+  }
+  .itin-day-tab button:disabled{
+    opacity:0.35;
+  }
+  .timeline{position:relative; padding-left:26px;}
+  .timeline::before{
+    content:'';
+    position:absolute; left:6px; top:6px; bottom:6px;
+    width:1.5px;
+    background:repeating-linear-gradient(to bottom, var(--line) 0 4px, transparent 4px 8px);
+  }
+  .timeline-item{
+    position:relative;
+    margin-bottom:16px;
+  }
+  .timeline-item::before{
+    content:'';
+    position:absolute;
+    left:-26px; top:4px;
+    width:11px; height:11px;
+    border-radius:50%;
+    background:var(--clay);
+    border:2px solid var(--cream);
+    box-shadow:0 0 0 1.5px var(--clay);
+  }
+  .timeline-card{
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:13px 15px;
+    box-shadow:var(--paper-shadow);
+  }
+  .timeline-card .time{
+    font-family:'Noto Serif TC', serif;
+    font-weight:700;
+    font-size:12.5px;
+    color:var(--clay);
+    margin-bottom:4px;
+  }
+  .timeline-card .title{font-size:14.5px; font-weight:700; color:var(--ink);}
+  .timeline-card .note{font-size:12px; color:var(--warmgray); margin-top:4px; line-height:1.5;}
+  .timeline-card .meta{
+    display:flex; gap:10px; margin-top:8px; font-size:11px; color:var(--mist);
+  }
+  .timeline-card .meta span{display:flex; align-items:center; gap:3px;}
+  .del{
+    color:var(--warmgray); font-size:11px; border:none; background:none; padding:2px;
+    font-family:'Noto Sans TC', sans-serif;
+  }
+  .timeline-card .card-actions{
+    float:right; display:flex; gap:10px;
+  }
+  .timeline-card.select-mode{
+    padding-left:44px;
+    position:relative;
+    cursor:pointer;
+    transition:border-color .15s ease, background .15s ease;
+  }
+  .timeline-card.select-mode.is-checked{
+    border-color:var(--danger);
+    background:rgba(178,76,58,0.05);
+  }
+  .itin-check{
+    position:absolute;
+    left:14px; top:14px;
+  }
+  .itin-check input[type="checkbox"]{
+    width:19px; height:19px;
+    accent-color:var(--danger);
+  }
+
+  /* ---------- Batch action bar ---------- */
+  .batch-bar{
+    position:fixed;
+    left:0; right:0;
+    bottom:0;
+    max-width:520px;
+    margin:0 auto;
+    background:var(--ink);
+    color:var(--cream);
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    padding:14px 20px calc(14px + env(safe-area-inset-bottom));
+    z-index:60;
+    transform:translateY(100%);
+    transition:transform .25s ease;
+    font-size:13.5px;
+  }
+  .batch-bar.show{transform:translateY(0);}
+  .batch-bar button{
+    background:var(--danger);
+    color:#fff;
+    border:none;
+    border-radius:12px;
+    padding:10px 18px;
+    font-size:13px;
+    font-weight:700;
+    font-family:'Noto Serif TC', serif;
+  }
+
+  /* ---------- FAB ---------- */
+  .fab{
+    position:fixed;
+    max-width:520px;
+    margin:0 auto;
+    left:0; right:0;
+    bottom:88px;
+    display:flex;
+    justify-content:flex-end;
+    padding:0 20px;
+    pointer-events:none;
+    z-index:40;
+  }
+  .fab button{
+    pointer-events:auto;
+    width:56px; height:56px;
+    border-radius:50%;
+    background:var(--clay);
+    color:#fff;
+    border:none;
+    font-size:26px;
+    box-shadow:0 6px 18px rgba(193,118,84,0.45);
+    display:flex; align-items:center; justify-content:center;
+  }
+
+  /* ---------- Bottom nav (ticket style) ---------- */
+  nav.tabbar{
+    position:fixed;
+    bottom:0; left:0; right:0;
+    max-width:520px;
+    margin:0 auto;
+    background:var(--ink);
+    display:flex;
+    padding:10px 8px calc(10px + env(safe-area-inset-bottom));
+    z-index:50;
+  }
+  nav.tabbar button{
+    flex:1;
+    background:none;
+    border:none;
+    color:rgba(251,246,239,0.5);
+    display:flex; flex-direction:column; align-items:center; gap:4px;
+    font-size:10.5px;
+    font-family:'Noto Sans TC', sans-serif;
+    padding:6px 0;
+    position:relative;
+  }
+  nav.tabbar button .ic{font-size:19px;}
+  nav.tabbar button.active{color:var(--cream);}
+  nav.tabbar button.active::before{
+    content:'';
+    position:absolute;
+    top:-10px; left:50%; transform:translateX(-50%);
+    width:4px; height:4px; border-radius:50%;
+    background:var(--clay);
+  }
+
+  /* ---------- Modal ---------- */
+  .modal-backdrop{
+    position:fixed; inset:0;
+    background:rgba(44,62,53,0.45);
+    z-index:100;
+    display:none;
+    align-items:flex-end;
+    justify-content:center;
+  }
+  .modal-backdrop.active{display:flex;}
+  .modal-sheet{
+    background:var(--cream);
+    width:100%; max-width:520px;
+    border-radius:22px 22px 0 0;
+    padding:20px 20px calc(24px + env(safe-area-inset-bottom));
+    max-height:88vh;
+    overflow-y:auto;
+    animation:slideUp .28s ease;
+  }
+  @keyframes slideUp{ from{transform:translateY(30px); opacity:0;} to{transform:translateY(0); opacity:1;} }
+  .modal-sheet .handle{
+    width:36px; height:4px; background:var(--line);
+    border-radius:2px; margin:0 auto 16px;
+  }
+  .modal-sheet h3{
+    font-family:'Noto Serif TC', serif;
+    font-size:18px; margin:0 0 16px;
+    display:flex; justify-content:space-between; align-items:center;
+  }
+  .modal-sheet h3 .x{font-size:15px; color:var(--warmgray); font-weight:400;}
+  .field{margin-bottom:14px;}
+  .field label{
+    display:block; font-size:12px; color:var(--warmgray);
+    margin-bottom:6px; font-weight:700;
+  }
+  .field input, .field select, .field textarea{
+    width:100%;
+    padding:12px 13px;
+    border:1px solid var(--line);
+    border-radius:12px;
+    background:#fff;
+    font-family:inherit;
+    font-size:14.5px;
+    color:var(--ink);
+    outline:none;
+  }
+  .field textarea{resize:vertical; min-height:60px;}
+  .field input:focus, .field select:focus, .field textarea:focus{border-color:var(--clay);}
+  .cat-grid{
+    display:grid;
+    grid-template-columns:repeat(4, 1fr);
+    gap:8px;
+  }
+  .cat-pick{
+    border:1.5px solid var(--line);
+    background:#fff;
+    border-radius:12px;
+    padding:10px 4px;
+    text-align:center;
+    font-size:10.5px;
+    color:var(--ink-soft);
+  }
+  .cat-pick .ic{font-size:19px; display:block; margin-bottom:3px;}
+  .cat-pick.sel{border-color:var(--clay); background:rgba(193,118,84,0.08); color:var(--clay);}
+  .who-pick-row{display:flex; gap:8px; flex-wrap:wrap;}
+  .who-pick{
+    border:1.5px solid var(--line);
+    background:#fff;
+    border-radius:20px;
+    padding:8px 14px;
+    font-size:13px;
+    color:var(--ink-soft);
+  }
+  .who-pick.sel{border-color:var(--mist); background:rgba(91,124,141,0.1); color:var(--mist);}
+  .btn-primary{
+    width:100%;
+    background:var(--ink);
+    color:var(--cream);
+    border:none;
+    border-radius:14px;
+    padding:15px;
+    font-size:15px;
+    font-weight:700;
+    font-family:'Noto Serif TC', serif;
+    margin-top:6px;
+  }
+  .btn-secondary{
+    width:100%;
+    background:#fff;
+    color:var(--ink-soft);
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:13px;
+    font-size:13.5px;
+    margin-top:8px;
+  }
+  .seg{
+    display:flex;
+    background:var(--cream-2);
+    border-radius:12px;
+    padding:3px;
+    margin-bottom:16px;
+  }
+  .seg button{
+    flex:1;
+    border:none;
+    background:none;
+    padding:9px;
+    border-radius:9px;
+    font-size:13px;
+    font-weight:700;
+    color:var(--warmgray);
+    font-family:'Noto Serif TC', serif;
+  }
+  .seg button.active{background:#fff; color:var(--ink); box-shadow:0 1px 3px rgba(0,0,0,0.08);}
+
+  /* toast */
+  .toast{
+    position:fixed;
+    bottom:150px; left:50%; transform:translateX(-50%) translateY(10px);
+    background:var(--ink); color:var(--cream);
+    padding:11px 20px; border-radius:24px;
+    font-size:13px; z-index:200;
+    opacity:0; pointer-events:none;
+    transition:all .25s ease;
+    max-width:80%;
+    text-align:center;
+  }
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+
+  ::-webkit-scrollbar{display:none;}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div class="topbar">
+    <div class="brand">旅程<span>帳</span></div>
+    <div class="trip-select">
+      ✈️ <select id="tripSelect"></select>
+    </div>
+  </div>
+
+  <main id="mainScroll">
+
+    <!-- ============ 總覽 ============ -->
+    <section class="screen active" id="screen-dashboard">
+      <div class="hero-card">
+        <div class="label">本次旅程總支出</div>
+        <div class="amount" id="dashTotal">NT$ 0</div>
+        <div class="sub" id="dashSub">尚無支出紀錄</div>
+        <div class="stat-row">
+          <div class="stat-box">
+            <div class="n" id="dashDays">0</div>
+            <div class="l">旅程天數</div>
+          </div>
+          <div class="stat-box">
+            <div class="n" id="dashAvg">NT$0</div>
+            <div class="l">日均花費</div>
+          </div>
+        </div>
+      </div>
+
+      <h2 class="section-title">分類佔比</h2>
+      <div class="cat-bars" id="dashCatBars"></div>
+
+      <h2 class="section-title">成員花費</h2>
+      <div class="who-row" id="dashWhoRow"></div>
+
+      <h2 class="section-title">今日行程</h2>
+      <div id="dashTodayItin"></div>
+    </section>
+
+    <!-- ============ 記帳 ============ -->
+    <section class="screen" id="screen-ledger">
+      <h2 class="section-title" style="margin-top:0">支出紀錄</h2>
+      <div id="ledgerList"></div>
+    </section>
+
+    <!-- ============ 行程 ============ -->
+    <section class="screen" id="screen-itinerary">
+      <div class="itin-day-tab" id="itinDayTabs"></div>
+      <div class="timeline" id="itinTimeline"></div>
+    </section>
+
+    <!-- ============ 設定 ============ -->
+    <section class="screen" id="screen-settings">
+      <h2 class="section-title" style="margin-top:0">旅程管理</h2>
+      <div id="tripList"></div>
+      <button class="btn-secondary" id="addTripBtn">＋ 新增旅程</button>
+
+      <h2 class="section-title">家庭成員</h2>
+      <div id="memberList"></div>
+      <button class="btn-secondary" id="addMemberBtn">＋ 新增成員</button>
+
+      <h2 class="section-title">資料</h2>
+      <button class="btn-secondary" id="exportBtn">匯出備份 (JSON)</button>
+      <button class="btn-secondary" id="importBtn">匯入備份</button>
+      <input type="file" id="importFile" accept=".json" style="display:none">
+      <p style="font-size:11.5px; color:var(--warmgray); margin-top:14px; line-height:1.6;">
+        目前資料儲存在本機裝置。若要多裝置即時同步，需要另外設定雲端資料庫（如 Firebase / Supabase），可以之後再加上。
+      </p>
+    </section>
+
+  </main>
+
+  <div class="fab" id="fabWrap">
+    <button id="fabBtn">＋</button>
+  </div>
+
+  <nav class="tabbar">
+    <button class="tab-btn active" data-screen="dashboard"><span class="ic">◈</span>總覽</button>
+    <button class="tab-btn" data-screen="ledger"><span class="ic">¥</span>記帳</button>
+    <button class="tab-btn" data-screen="itinerary"><span class="ic">✈</span>行程</button>
+    <button class="tab-btn" data-screen="settings"><span class="ic">⚙</span>設定</button>
+  </nav>
+
+</div>
+
+<!-- ============ 新增支出 Modal ============ -->
+<div class="modal-backdrop" id="expenseModal">
+  <div class="modal-sheet">
+    <div class="handle"></div>
+    <h3><span id="expModalTitle">新增支出</span> <span class="x" data-close="expenseModal">✕</span></h3>
+    <input type="hidden" id="expEditId" value="">
+    <div class="field">
+      <label>金額</label>
+      <input type="number" id="expAmount" placeholder="0" inputmode="decimal">
+    </div>
+    <div class="field">
+      <label>項目名稱</label>
+      <input type="text" id="expTitle" placeholder="例如：晚餐、車票、飯店">
+    </div>
+    <div class="field">
+      <label>分類</label>
+      <div class="cat-grid" id="expCatGrid"></div>
+    </div>
+    <div class="field">
+      <label>誰付的</label>
+      <div class="who-pick-row" id="expWhoRow"></div>
+    </div>
+    <div class="field">
+      <label>日期</label>
+      <input type="date" id="expDate">
+    </div>
+    <div class="field">
+      <label>備註（選填）</label>
+      <input type="text" id="expNote" placeholder="">
+    </div>
+    <button class="btn-primary" id="saveExpenseBtn">儲存支出</button>
+  </div>
+</div>
+
+<!-- ============ 新增／修改行程 Modal ============ -->
+<div class="modal-backdrop" id="itinModal">
+  <div class="modal-sheet">
+    <div class="handle"></div>
+    <h3><span id="itinModalTitle">新增行程</span> <span class="x" data-close="itinModal">✕</span></h3>
+    <input type="hidden" id="itinEditId" value="">
+    <div class="field">
+      <label>日期</label>
+      <input type="date" id="itinDate">
+      <div id="itinDateHint" style="font-size:11px; color:var(--warmgray); margin-top:5px;"></div>
+    </div>
+    <div class="field">
+      <label>時間</label>
+      <input type="time" id="itinTime">
+    </div>
+    <div class="field">
+      <label>行程名稱</label>
+      <input type="text" id="itinTitle" placeholder="例如：抵達機場、參觀神社">
+    </div>
+    <div class="field">
+      <label>地點（選填）</label>
+      <input type="text" id="itinLocation" placeholder="">
+    </div>
+    <div class="field">
+      <label>備註（選填）</label>
+      <textarea id="itinNote" placeholder="交通方式、注意事項..."></textarea>
+    </div>
+    <button class="btn-primary" id="saveItinBtn">儲存行程</button>
+
+  </div>
+</div>
+
+<!-- ============ 新增旅程 Modal ============ -->
+<div class="modal-backdrop" id="tripModal">
+  <div class="modal-sheet">
+    <div class="handle"></div>
+    <h3><span id="tripModalTitle">新增旅程</span> <span class="x" data-close="tripModal">✕</span></h3>
+    <input type="hidden" id="tripEditId" value="">
+    <div class="field">
+      <label>旅程名稱</label>
+      <input type="text" id="tripName" placeholder="例如：東京親子五日遊">
+    </div>
+    <div class="field">
+      <label>出發日期</label>
+      <input type="date" id="tripStart">
+    </div>
+    <div class="field">
+      <label>結束日期</label>
+      <input type="date" id="tripEnd">
+    </div>
+    <button class="btn-primary" id="saveTripBtn">建立旅程</button>
+  </div>
+</div>
+
+<!-- ============ 新增成員 Modal ============ -->
+<div class="modal-backdrop" id="memberModal">
+  <div class="modal-sheet">
+    <div class="handle"></div>
+    <h3>新增成員 <span class="x" data-close="memberModal">✕</span></h3>
+    <div class="field">
+      <label>姓名</label>
+      <input type="text" id="memberName" placeholder="例如：爸爸、媽媽、小明">
+    </div>
+    <div class="field">
+      <label>顏色標籤</label>
+      <div class="who-pick-row" id="memberColorRow"></div>
+    </div>
+    <button class="btn-primary" id="saveMemberBtn">新增成員</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

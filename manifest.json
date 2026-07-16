@@ -1,0 +1,15 @@
+{
+  "name": "旅程帳 · 家庭旅行記帳",
+  "short_name": "旅程帳",
+  "description": "家庭旅行記帳與行程規劃 App",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#FBF6EF",
+  "theme_color": "#2C3E35",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "icon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
