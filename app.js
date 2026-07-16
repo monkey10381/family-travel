@@ -841,8 +841,12 @@ function friendlyAuthError(err) {
     'auth/email-already-in-use': '這個 Email 已經被註冊過了，請改用登入',
     'auth/weak-password': '密碼至少需要 6 個字元',
     'auth/network-request-failed': '網路連線異常，請稍後再試',
+    'permission-denied': '沒有權限存取資料庫，請確認 Firestore 安全規則設定',
+    'unavailable': '無法連線到伺服器，請檢查網路',
   };
-  return map[code] || '發生錯誤，請稍後再試';
+  const friendly = map[code];
+  const detail = code || (err && err.message) || '未知錯誤';
+  return friendly ? `${friendly}（代碼：${detail}）` : `發生錯誤（代碼：${detail}）`;
 }
 
 function wireAuthEvents() {
@@ -1009,7 +1013,7 @@ async function handleSignedIn(user) {
     goScreen('dashboard');
   } catch (err) {
     console.error(err);
-    showAuthError('載入家庭空間時發生錯誤，請重新整理再試一次');
+    showAuthError(`載入家庭空間時發生錯誤（代碼：${(err && err.code) || (err && err.message) || '未知'}）`);
   }
 }
 
