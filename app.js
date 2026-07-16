@@ -25,6 +25,7 @@ let state = {
 /* ---------------- Firebase / 家庭空間層 ---------------- */
 let currentUser = null;     // { uid, email, displayName }
 let currentFamilyId = null; // 目前登入使用者所屬的家庭空間 id
+let isSigningUp = false;    // 註冊流程進行中時，暫停 onAuthStateChanged 的自動處理，避免資料尚未寫完就被搶先讀取
 let unsubscribeFamily = null; // Firestore 即時監聽的取消函式
 let isApplyingRemoteUpdate = false; // 避免收到自己剛寫入的資料又重複同步造成迴圈
 
@@ -908,6 +909,7 @@ function wireAuthEvents() {
     const btn = document.getElementById('signupSubmitBtn');
     const loading = document.getElementById('signupLoading');
     btn.disabled = true; loading.classList.add('show');
+    isSigningUp = true;
 
     try {
       let familyId = null;
@@ -924,6 +926,7 @@ function wireAuthEvents() {
         if (snap.empty) {
           showAuthError('找不到這個邀請碼，請確認後再試一次');
           btn.disabled = false; loading.classList.remove('show');
+          isSigningUp = false;
           return;
         }
         familyId = snap.docs[0].id;
@@ -966,8 +969,12 @@ function wireAuthEvents() {
       await window.fb.setDoc(window.fb.doc(window.fb.db, 'users', cred.user.uid), {
         familyId, name, email,
       });
-      // onAuthStateChanged 會接手後續流程
+
+      // 資料已完整寫入，現在才交給正式的登入流程接手
+      isSigningUp = false;
+      await handleSignedIn(cred.user);
     } catch (err) {
+      isSigningUp = false;
       showAuthError(friendlyAuthError(err));
       btn.disabled = false; loading.classList.remove('show');
     }
@@ -1033,6 +1040,7 @@ function init() {
   wireEvents();
 
   window.fb.onAuthStateChanged(window.fb.auth, (user) => {
+    if (isSigningUp) return; // 註冊流程會在資料寫完後自行呼叫 handleSignedIn，這裡先不處理
     if (user) handleSignedIn(user);
     else handleSignedOut();
   });
