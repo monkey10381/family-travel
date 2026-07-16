@@ -12,6 +12,41 @@
 <meta name="apple-mobile-web-app-title" content="旅程帳">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700;900&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+  import {
+    getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
+    onAuthStateChanged, signOut, updateProfile
+  } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+  import {
+    getFirestore, doc, getDoc, setDoc, collection, addDoc, updateDoc, deleteDoc,
+    onSnapshot, query, where, serverTimestamp
+  } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyDsauKs6PTZ9TavGhcx3m_t1qm9h894OgM",
+    authDomain: "family-travel-681d6.firebaseapp.com",
+    projectId: "family-travel-681d6",
+    storageBucket: "family-travel-681d6.firebasestorage.app",
+    messagingSenderId: "223523092097",
+    appId: "1:223523092097:web:b4b69dfe769a2dfd71bf80",
+    measurementId: "G-WFZG7PL0L5"
+  };
+
+  const fbApp = initializeApp(firebaseConfig);
+  const auth = getAuth(fbApp);
+  const db = getFirestore(fbApp);
+
+  // 掛在 window 上，讓 app.js（非 module script）可以呼叫
+  window.fb = {
+    auth, db,
+    createUserWithEmailAndPassword, signInWithEmailAndPassword,
+    onAuthStateChanged, signOut, updateProfile,
+    doc, getDoc, setDoc, collection, addDoc, updateDoc, deleteDoc,
+    onSnapshot, query, where, serverTimestamp
+  };
+  window.dispatchEvent(new Event('firebase-ready'));
+</script>
 <style>
   :root{
     --cream:#FBF6EF;
@@ -586,10 +621,146 @@
   .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
 
   ::-webkit-scrollbar{display:none;}
+
+  /* ---------- Auth screen ---------- */
+  #authScreen{
+    position:fixed; inset:0;
+    max-width:520px; margin:0 auto;
+    background:var(--cream);
+    z-index:200;
+    display:flex; flex-direction:column;
+    padding:calc(48px + env(safe-area-inset-top)) 28px 32px;
+    overflow-y:auto;
+  }
+  #authScreen.hide{display:none;}
+  .auth-brand{
+    font-family:'Noto Serif TC', serif;
+    font-weight:900;
+    font-size:30px;
+    color:var(--ink);
+    margin-bottom:4px;
+  }
+  .auth-brand span{color:var(--clay);}
+  .auth-sub{
+    font-size:13px; color:var(--warmgray); margin-bottom:32px;
+  }
+  .auth-tabs{
+    display:flex; background:var(--cream-2); border-radius:12px; padding:3px; margin-bottom:22px;
+  }
+  .auth-tabs button{
+    flex:1; border:none; background:none; padding:10px;
+    border-radius:9px; font-size:13.5px; font-weight:700;
+    font-family:'Noto Serif TC', serif; color:var(--warmgray);
+  }
+  .auth-tabs button.active{background:#fff; color:var(--ink); box-shadow:0 1px 3px rgba(0,0,0,0.08);}
+  .auth-form{display:none;}
+  .auth-form.active{display:block;}
+  .auth-field{margin-bottom:14px;}
+  .auth-field label{
+    display:block; font-size:12px; color:var(--warmgray); margin-bottom:6px; font-weight:700;
+  }
+  .auth-field input{
+    width:100%; padding:13px; border:1px solid var(--line); border-radius:12px;
+    background:#fff; font-family:inherit; font-size:14.5px; color:var(--ink); outline:none;
+  }
+  .auth-field input:focus{border-color:var(--clay);}
+  .auth-field .hint{font-size:11px; color:var(--warmgray); margin-top:5px; line-height:1.5;}
+  .auth-submit{
+    width:100%; background:var(--ink); color:var(--cream); border:none;
+    border-radius:14px; padding:15px; font-size:15px; font-weight:700;
+    font-family:'Noto Serif TC', serif; margin-top:8px;
+  }
+  .auth-submit:disabled{opacity:0.5;}
+  .auth-error{
+    background:rgba(178,76,58,0.08); color:var(--danger);
+    border-radius:10px; padding:10px 12px; font-size:12.5px; margin-bottom:14px;
+    display:none; line-height:1.5;
+  }
+  .auth-error.show{display:block;}
+  .auth-loading{
+    display:none; align-items:center; gap:8px; font-size:12.5px; color:var(--warmgray); margin-top:10px;
+  }
+  .auth-loading.show{display:flex;}
+  .family-code-box{
+    background:#fff; border:1.5px dashed var(--clay); border-radius:14px;
+    padding:16px; text-align:center; margin:18px 0;
+  }
+  .family-code-box .label{font-size:11.5px; color:var(--warmgray); margin-bottom:6px;}
+  .family-code-box .code{
+    font-family:'Noto Serif TC', serif; font-size:24px; font-weight:900;
+    color:var(--clay); letter-spacing:3px;
+  }
 </style>
 </head>
 <body>
-<div id="app">
+
+<!-- ============ 登入 / 註冊畫面 ============ -->
+<div id="authScreen">
+  <div class="auth-brand">旅程<span>帳</span></div>
+  <div class="auth-sub">家庭共用的旅行記帳與行程規劃</div>
+
+  <div id="authErrorBox" class="auth-error"></div>
+
+  <div class="auth-tabs">
+    <button id="authTabLogin" class="active" data-auth-tab="login">登入</button>
+    <button id="authTabSignup" data-auth-tab="signup">註冊新帳號</button>
+  </div>
+
+  <!-- 登入表單 -->
+  <form id="loginForm" class="auth-form active">
+    <div class="auth-field">
+      <label>Email</label>
+      <input type="email" id="loginEmail" autocomplete="email" required>
+    </div>
+    <div class="auth-field">
+      <label>密碼</label>
+      <input type="password" id="loginPassword" autocomplete="current-password" required>
+    </div>
+    <button type="submit" class="auth-submit" id="loginSubmitBtn">登入</button>
+    <div class="auth-loading" id="loginLoading">登入中…</div>
+  </form>
+
+  <!-- 註冊表單 -->
+  <form id="signupForm" class="auth-form">
+    <div class="auth-field">
+      <label>你的稱呼</label>
+      <input type="text" id="signupName" placeholder="例如：爸爸、媽媽、小明" required>
+    </div>
+    <div class="auth-field">
+      <label>Email</label>
+      <input type="email" id="signupEmail" autocomplete="email" required>
+    </div>
+    <div class="auth-field">
+      <label>密碼</label>
+      <input type="password" id="signupPassword" autocomplete="new-password" required minlength="6">
+      <div class="hint">至少 6 個字元</div>
+    </div>
+
+    <div class="auth-field">
+      <label>家庭空間</label>
+      <div class="seg" style="margin-bottom:0;">
+        <button type="button" id="familyModeCreate" class="active" data-family-mode="create">建立新家庭</button>
+        <button type="button" id="familyModeJoin" data-family-mode="join">加入現有家庭</button>
+      </div>
+    </div>
+
+    <div class="auth-field" id="familyNameField">
+      <label>家庭名稱</label>
+      <input type="text" id="familyNameInput" placeholder="例如：吳家出遊">
+      <div class="hint">建立後會產生一組邀請碼，分享給家人即可一起加入</div>
+    </div>
+
+    <div class="auth-field" id="familyCodeField" style="display:none;">
+      <label>邀請碼</label>
+      <input type="text" id="familyCodeInput" placeholder="請輸入家人分享的邀請碼" style="text-transform:uppercase;">
+    </div>
+
+    <button type="submit" class="auth-submit" id="signupSubmitBtn">建立帳號</button>
+    <div class="auth-loading" id="signupLoading">處理中…</div>
+  </form>
+</div>
+
+<div id="app" style="display:none;">
 
   <div class="topbar">
     <div class="brand">旅程<span>帳</span></div>
@@ -642,20 +813,27 @@
 
     <!-- ============ 設定 ============ -->
     <section class="screen" id="screen-settings">
-      <h2 class="section-title" style="margin-top:0">旅程管理</h2>
+      <h2 class="section-title" style="margin-top:0">家庭空間</h2>
+      <div class="family-code-box">
+        <div class="label">邀請碼（分享給家人一起加入）</div>
+        <div class="code" id="familyCodeDisplay">------</div>
+      </div>
+      <button class="btn-secondary" id="logoutBtn" style="color:var(--danger);">登出</button>
+
+      <h2 class="section-title">旅程管理</h2>
       <div id="tripList"></div>
       <button class="btn-secondary" id="addTripBtn">＋ 新增旅程</button>
 
       <h2 class="section-title">家庭成員</h2>
+      <p style="font-size:11.5px; color:var(--warmgray); margin:-4px 0 10px; line-height:1.6;">
+        以下是目前已加入這個家庭空間的成員，新增成員請請他們用邀請碼註冊帳號。
+      </p>
       <div id="memberList"></div>
-      <button class="btn-secondary" id="addMemberBtn">＋ 新增成員</button>
 
       <h2 class="section-title">資料</h2>
       <button class="btn-secondary" id="exportBtn">匯出備份 (JSON)</button>
-      <button class="btn-secondary" id="importBtn">匯入備份</button>
-      <input type="file" id="importFile" accept=".json" style="display:none">
       <p style="font-size:11.5px; color:var(--warmgray); margin-top:14px; line-height:1.6;">
-        目前資料儲存在本機裝置。若要多裝置即時同步，需要另外設定雲端資料庫（如 Firebase / Supabase），可以之後再加上。
+        資料已儲存在雲端，家人登入同一個家庭空間即可即時同步。
       </p>
     </section>
 
@@ -759,23 +937,6 @@
       <input type="date" id="tripEnd">
     </div>
     <button class="btn-primary" id="saveTripBtn">建立旅程</button>
-  </div>
-</div>
-
-<!-- ============ 新增成員 Modal ============ -->
-<div class="modal-backdrop" id="memberModal">
-  <div class="modal-sheet">
-    <div class="handle"></div>
-    <h3>新增成員 <span class="x" data-close="memberModal">✕</span></h3>
-    <div class="field">
-      <label>姓名</label>
-      <input type="text" id="memberName" placeholder="例如：爸爸、媽媽、小明">
-    </div>
-    <div class="field">
-      <label>顏色標籤</label>
-      <div class="who-pick-row" id="memberColorRow"></div>
-    </div>
-    <button class="btn-primary" id="saveMemberBtn">新增成員</button>
   </div>
 </div>
 

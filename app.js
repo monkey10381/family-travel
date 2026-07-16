@@ -1,9 +1,7 @@
 /* ===========================================================
    旅程帳 - 家庭旅行記帳 App
-   本機儲存版（localStorage），架構預留雲端同步擴充空間
+   雲端同步版（Firebase Auth + Firestore）
    =========================================================== */
-
-const STORAGE_KEY = 'travel_ledger_data_v1';
 
 const CATEGORIES = [
   { id: 'food',      name: '餐飲', icon: '🍜', color: '#C17654' },
@@ -24,37 +22,84 @@ let state = {
   itinSelectedIds: new Set(),
 };
 
-/* ---------------- Storage layer ----------------
-   之後要接雲端同步時，只需要把 loadDB / saveDB
-   換成呼叫 API（例如 Firebase / Supabase），
-   其餘畫面邏輯不需更動。
----------------------------------------------------- */
-function loadDB() {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (raw) {
-    try { return JSON.parse(raw); } catch (e) { /* fall through */ }
-  }
-  // 初始示範資料結構
-  const today = new Date();
-  const fmt = d => d.toISOString().slice(0, 10);
-  const start = fmt(today);
-  const end = fmt(new Date(today.getTime() + 4 * 86400000));
+/* ---------------- Firebase / 家庭空間層 ---------------- */
+let currentUser = null;     // { uid, email, displayName }
+let currentFamilyId = null; // 目前登入使用者所屬的家庭空間 id
+let unsubscribeFamily = null; // Firestore 即時監聽的取消函式
+let isApplyingRemoteUpdate = false; // 避免收到自己剛寫入的資料又重複同步造成迴圈
+
+function emptyDB() {
+  const today = todayISO();
   return {
-    members: [
-      { id: 'm1', name: '爸爸', color: '#C17654' },
-      { id: 'm2', name: '媽媽', color: '#5B7C8D' },
-    ],
-    trips: [
-      { id: 't1', name: '我的旅程', start, end }
-    ],
-    activeTrip: 't1',
+    members: [],       // 由家庭成員（Firebase 使用者）自動組成，不再手動管理
+    trips: [{ id: uid(), name: '我的旅程', start: today, end: today }],
+    activeTrip: null,
     expenses: [],
     itinerary: [],
   };
 }
 
-function saveDB() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(DB));
+function genFamilyCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 避開易混淆字元
+  let code = '';
+  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
+// 將整包 DB 寫回 Firestore（單一文件儲存，簡化同步邏輯）
+async function syncDB() {
+  if (!currentFamilyId || isApplyingRemoteUpdate) return;
+  try {
+    await window.fb.setDoc(
+      window.fb.doc(window.fb.db, 'families', currentFamilyId),
+      { data: DB, updatedAt: window.fb.serverTimestamp() },
+      { merge: true }
+    );
+  } catch (err) {
+    console.error('同步失敗', err);
+    showToast('同步失敗，請確認網路連線');
+  }
+}
+
+// 開始監聽家庭空間資料，任何人異動都會即時反映
+// 回傳一個 Promise，於「第一次」收到資料時 resolve，確保呼叫端渲染畫面前 DB 已就緒
+function listenFamily(familyId) {
+  if (unsubscribeFamily) { unsubscribeFamily(); unsubscribeFamily = null; }
+  const ref = window.fb.doc(window.fb.db, 'families', familyId);
+  let firstLoadResolved = false;
+  return new Promise((resolve) => {
+    unsubscribeFamily = window.fb.onSnapshot(ref, (snap) => {
+      if (!snap.exists()) {
+        if (!firstLoadResolved) { firstLoadResolved = true; resolve(); }
+        return;
+      }
+      const remote = snap.data();
+      isApplyingRemoteUpdate = true;
+      DB = remote.data || emptyDB();
+      if (!DB.activeTrip && DB.trips.length) DB.activeTrip = DB.trips[0].id;
+      syncMembersFromRoster(remote.roster || {});
+      isApplyingRemoteUpdate = false;
+      if (!firstLoadResolved) {
+        firstLoadResolved = true;
+        resolve();
+      } else if (document.getElementById('app')) {
+        renderAll();
+      }
+    }, (err) => {
+      console.error('監聽失敗', err);
+      if (!firstLoadResolved) { firstLoadResolved = true; resolve(); }
+    });
+  });
+}
+
+// roster：家庭空間內所有已註冊成員的名冊（uid -> {name, color}），與 DB.members 同步
+function syncMembersFromRoster(roster) {
+  const ids = Object.keys(roster);
+  DB.members = ids.map(uidKey => ({
+    id: uidKey,
+    name: roster[uidKey].name,
+    color: roster[uidKey].color,
+  }));
 }
 
 /* ---------------- Helpers ---------------- */
@@ -111,6 +156,7 @@ function showToast(msg) {
 
 /* ---------------- Rendering ---------------- */
 function renderAll() {
+  if (!DB) return;
   renderTripSelect();
   renderDashboard();
   renderLedger();
@@ -337,7 +383,7 @@ function renderItinBatchBar() {
       DB.itinerary = DB.itinerary.filter(i => !state.itinSelectedIds.has(i.id));
       state.itinSelectedIds.clear();
       state.itinSelectMode = false;
-      saveDB();
+      syncDB();
       renderAll();
       showToast(`已刪除 ${n} 筆行程`);
     });
@@ -380,12 +426,16 @@ function renderSettings() {
     </div>`).join('');
 
   const memberListEl = document.getElementById('memberList');
-  memberListEl.innerHTML = DB.members.map(m => `
-    <div class="expense-card">
-      <div class="avatar" style="width:36px;height:36px;border-radius:50%;background:${m.color};display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-family:'Noto Serif TC',serif;flex-shrink:0;">${m.name.slice(0,1)}</div>
-      <div class="mid"><div class="t1">${escapeHtml(m.name)}</div></div>
-      <button class="del" style="float:none; color:var(--danger);" data-del-member="${m.id}">刪除</button>
-    </div>`).join('');
+  if (!DB.members.length) {
+    memberListEl.innerHTML = `<div class="empty-state" style="padding:24px 20px;"><div class="d">還沒有成員資料</div></div>`;
+  } else {
+    memberListEl.innerHTML = DB.members.map(m => `
+      <div class="expense-card">
+        <div class="avatar" style="width:36px;height:36px;border-radius:50%;background:${m.color};display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-family:'Noto Serif TC',serif;flex-shrink:0;">${m.name.slice(0,1)}</div>
+        <div class="mid"><div class="t1">${escapeHtml(m.name)}</div></div>
+        ${currentUser && m.id === currentUser.uid ? '<div class="who" style="color:var(--clay);">你</div>' : ''}
+      </div>`).join('');
+  }
 }
 
 function escapeHtml(s) {
@@ -404,7 +454,7 @@ function goScreen(name) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.screen === name));
   document.getElementById('fabWrap').style.display = (name === 'settings') ? 'none' : 'flex';
   document.getElementById('mainScroll').scrollTop = 0;
-  if (name === 'itinerary') renderItinerary();
+  if (name === 'itinerary' && DB) renderItinerary();
 }
 
 /* ---------------- Modals ---------------- */
@@ -440,7 +490,7 @@ function buildWhoRow(selectedWho) {
 }
 
 function openExpenseModal(editId) {
-  if (!DB.members.length) { showToast('請先到設定頁新增家庭成員'); goScreen('settings'); return; }
+  if (!DB.members.length) { showToast('尚未載入家庭成員資料，請稍候再試'); return; }
   const editing = editId ? DB.expenses.find(x => x.id === editId) : null;
   buildCatGrid(editing ? editing.category : null);
   buildWhoRow(editing ? editing.paidBy : null);
@@ -487,26 +537,6 @@ function openTripModal(editId) {
   openModal('tripModal');
 }
 
-function buildMemberColorRow() {
-  const el = document.getElementById('memberColorRow');
-  el.innerHTML = MEMBER_COLORS.map((c, idx) => `
-    <button type="button" class="who-pick ${idx === 0 ? 'sel' : ''}" data-color="${c}" style="border-color:${c}; ${idx===0?`background:${c}22;color:${c};`:''}">●</button>`).join('');
-  el.querySelectorAll('.who-pick').forEach(btn => {
-    btn.addEventListener('click', () => {
-      el.querySelectorAll('.who-pick').forEach(b => { b.classList.remove('sel'); b.style.background=''; b.style.color=''; });
-      btn.classList.add('sel');
-      btn.style.background = btn.dataset.color + '22';
-      btn.style.color = btn.dataset.color;
-    });
-  });
-}
-
-function openMemberModal() {
-  document.getElementById('memberName').value = '';
-  buildMemberColorRow();
-  openModal('memberModal');
-}
-
 /* ---------------- Event wiring ---------------- */
 function wireEvents() {
   document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -528,7 +558,7 @@ function wireEvents() {
   document.getElementById('tripSelect').addEventListener('change', (e) => {
     DB.activeTrip = e.target.value;
     state.currentItinDate = activeTrip() ? activeTrip().start : todayISO();
-    saveDB();
+    syncDB();
     renderAll();
   });
 
@@ -553,7 +583,7 @@ function wireEvents() {
       if (item) {
         Object.assign(item, { amount, title, note, date, category, paidBy });
       }
-      saveDB();
+      syncDB();
       closeModal('expenseModal');
       renderAll();
       showToast('已儲存修改');
@@ -565,7 +595,7 @@ function wireEvents() {
         time: new Date().toTimeString().slice(0, 5),
         category, paidBy,
       });
-      saveDB();
+      syncDB();
       closeModal('expenseModal');
       renderAll();
       showToast('已新增支出');
@@ -594,7 +624,7 @@ function wireEvents() {
       if (item) {
         Object.assign(item, { date, time: time || '00:00', title, location, note });
       }
-      saveDB();
+      syncDB();
       closeModal('itinModal');
       state.currentItinDate = date;
       renderAll();
@@ -603,7 +633,7 @@ function wireEvents() {
       DB.itinerary.push({
         id: uid(), tripId: DB.activeTrip, date, time: time || '00:00', title, location, note,
       });
-      saveDB();
+      syncDB();
       closeModal('itinModal');
       state.currentItinDate = date;
       renderAll();
@@ -632,7 +662,7 @@ function wireEvents() {
       if (trip) {
         const outOfRange = DB.itinerary.some(i => i.tripId === editId && (i.date < start || i.date > end));
         Object.assign(trip, { name, start, end });
-        saveDB();
+        syncDB();
         closeModal('tripModal');
         if (state.currentItinDate < start || state.currentItinDate > end) state.currentItinDate = start;
         renderAll();
@@ -643,26 +673,14 @@ function wireEvents() {
       DB.trips.push({ id, name, start, end });
       DB.activeTrip = id;
       state.currentItinDate = start;
-      saveDB();
+      syncDB();
       closeModal('tripModal');
       renderAll();
       showToast('旅程已建立');
     }
   });
 
-  document.getElementById('saveMemberBtn').addEventListener('click', () => {
-    const name = document.getElementById('memberName').value.trim();
-    const colorBtn = document.querySelector('#memberColorRow .who-pick.sel');
-    if (!name) { showToast('請輸入姓名'); return; }
-    DB.members.push({ id: uid(), name, color: colorBtn ? colorBtn.dataset.color : MEMBER_COLORS[0] });
-    saveDB();
-    closeModal('memberModal');
-    renderAll();
-    showToast('已新增成員');
-  });
-
   document.getElementById('addTripBtn').addEventListener('click', openTripModal);
-  document.getElementById('addMemberBtn').addEventListener('click', openMemberModal);
 
   document.getElementById('itinDayTabs').addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-date]');
@@ -694,7 +712,7 @@ function wireEvents() {
     if (!del) return;
     if (del.dataset.confirming === '1') {
       DB.itinerary = DB.itinerary.filter(i => i.id !== del.dataset.delItin);
-      saveDB();
+      syncDB();
       renderAll();
       showToast('已刪除行程');
     } else {
@@ -717,7 +735,7 @@ function wireEvents() {
     if (del) {
       if (del.dataset.confirming === '1') {
         DB.expenses = DB.expenses.filter(x => x.id !== del.dataset.delExpense);
-        saveDB();
+        syncDB();
         renderAll();
         showToast('已刪除支出');
       } else {
@@ -756,7 +774,7 @@ function wireEvents() {
           DB.activeTrip = DB.trips[0].id;
           state.currentItinDate = activeTrip().start;
         }
-        saveDB();
+        syncDB();
         renderAll();
         showToast('已刪除旅程與其所有支出、行程紀錄');
       } else {
@@ -778,28 +796,8 @@ function wireEvents() {
     if (!btn) return;
     DB.activeTrip = btn.dataset.selectTrip;
     state.currentItinDate = activeTrip() ? activeTrip().start : todayISO();
-    saveDB();
+    syncDB();
     renderAll();
-  });
-
-  document.getElementById('memberList').addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-del-member]');
-    if (!btn) return;
-    if (btn.dataset.confirming === '1') {
-      DB.members = DB.members.filter(m => m.id !== btn.dataset.delMember);
-      saveDB();
-      renderAll();
-      showToast('已刪除成員');
-    } else {
-      btn.dataset.confirming = '1';
-      btn.textContent = '確定刪除？';
-      setTimeout(() => {
-        if (btn.isConnected) {
-          btn.dataset.confirming = '0';
-          btn.textContent = '刪除';
-        }
-      }, 2500);
-    }
   });
 
   document.getElementById('exportBtn').addEventListener('click', () => {
@@ -812,46 +810,237 @@ function wireEvents() {
     URL.revokeObjectURL(url);
     showToast('已匯出備份');
   });
+}
 
-  document.getElementById('importBtn').addEventListener('click', () => {
-    document.getElementById('importFile').click();
+/* ---------------- Auth / 家庭空間 UI ---------------- */
+function showAuthScreen() {
+  document.getElementById('authScreen').classList.remove('hide');
+  document.getElementById('app').style.display = 'none';
+}
+function hideAuthScreen() {
+  document.getElementById('authScreen').classList.add('hide');
+  document.getElementById('app').style.display = '';
+}
+function showAuthError(msg) {
+  const box = document.getElementById('authErrorBox');
+  box.textContent = msg;
+  box.classList.add('show');
+}
+function clearAuthError() {
+  const box = document.getElementById('authErrorBox');
+  box.classList.remove('show');
+  box.textContent = '';
+}
+function friendlyAuthError(err) {
+  const code = err && err.code || '';
+  const map = {
+    'auth/invalid-email': 'Email 格式不正確',
+    'auth/user-not-found': '找不到這個帳號，請確認 Email 或先註冊',
+    'auth/wrong-password': '密碼錯誤',
+    'auth/invalid-credential': 'Email 或密碼不正確',
+    'auth/email-already-in-use': '這個 Email 已經被註冊過了，請改用登入',
+    'auth/weak-password': '密碼至少需要 6 個字元',
+    'auth/network-request-failed': '網路連線異常，請稍後再試',
+  };
+  return map[code] || '發生錯誤，請稍後再試';
+}
+
+function wireAuthEvents() {
+  // 登入／註冊分頁切換
+  document.querySelectorAll('[data-auth-tab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      clearAuthError();
+      document.querySelectorAll('[data-auth-tab]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('loginForm').classList.toggle('active', btn.dataset.authTab === 'login');
+      document.getElementById('signupForm').classList.toggle('active', btn.dataset.authTab === 'signup');
+    });
   });
-  document.getElementById('importFile').addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const data = JSON.parse(reader.result);
-        if (!data.trips || !data.members) throw new Error('invalid');
-        DB = data;
-        saveDB();
-        renderAll();
-        showToast('已匯入備份');
-      } catch (err) {
-        showToast('檔案格式錯誤，匯入失敗');
+
+  // 建立新家庭／加入現有家庭 切換
+  document.querySelectorAll('[data-family-mode]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('[data-family-mode]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const isCreate = btn.dataset.familyMode === 'create';
+      document.getElementById('familyNameField').style.display = isCreate ? '' : 'none';
+      document.getElementById('familyCodeField').style.display = isCreate ? 'none' : '';
+    });
+  });
+
+  // 登入
+  document.getElementById('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    clearAuthError();
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    const btn = document.getElementById('loginSubmitBtn');
+    const loading = document.getElementById('loginLoading');
+    btn.disabled = true; loading.classList.add('show');
+    try {
+      await window.fb.signInWithEmailAndPassword(window.fb.auth, email, password);
+      // onAuthStateChanged 會接手後續流程
+    } catch (err) {
+      showAuthError(friendlyAuthError(err));
+      btn.disabled = false; loading.classList.remove('show');
+    }
+  });
+
+  // 註冊
+  document.getElementById('signupForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    clearAuthError();
+    const name = document.getElementById('signupName').value.trim();
+    const email = document.getElementById('signupEmail').value.trim();
+    const password = document.getElementById('signupPassword').value;
+    const mode = document.querySelector('[data-family-mode].active').dataset.familyMode;
+    const familyName = document.getElementById('familyNameInput').value.trim();
+    const familyCode = document.getElementById('familyCodeInput').value.trim().toUpperCase();
+
+    if (!name) { showAuthError('請輸入你的稱呼'); return; }
+    if (mode === 'create' && !familyName) { showAuthError('請輸入家庭名稱'); return; }
+    if (mode === 'join' && !familyCode) { showAuthError('請輸入邀請碼'); return; }
+
+    const btn = document.getElementById('signupSubmitBtn');
+    const loading = document.getElementById('signupLoading');
+    btn.disabled = true; loading.classList.add('show');
+
+    try {
+      let familyId = null;
+
+      if (mode === 'join') {
+        // 先找出邀請碼對應的家庭空間
+        const q = window.fb.query(
+          window.fb.collection(window.fb.db, 'families'),
+          window.fb.where('code', '==', familyCode)
+        );
+        const snap = await new Promise((resolve, reject) => {
+          const unsub = window.fb.onSnapshot(q, (s) => { unsub(); resolve(s); }, reject);
+        });
+        if (snap.empty) {
+          showAuthError('找不到這個邀請碼，請確認後再試一次');
+          btn.disabled = false; loading.classList.remove('show');
+          return;
+        }
+        familyId = snap.docs[0].id;
       }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
+
+      // 建立帳號
+      const cred = await window.fb.createUserWithEmailAndPassword(window.fb.auth, email, password);
+      await window.fb.updateProfile(cred.user, { displayName: name });
+
+      if (mode === 'create') {
+        familyId = uid() + uid();
+        const code = genFamilyCode();
+        const initialData = emptyDB();
+        initialData.activeTrip = initialData.trips[0].id;
+        await window.fb.setDoc(window.fb.doc(window.fb.db, 'families', familyId), {
+          name: familyName,
+          code,
+          ownerUid: cred.user.uid,
+          data: initialData,
+          roster: {
+            [cred.user.uid]: { name, color: MEMBER_COLORS[0] }
+          },
+          createdAt: window.fb.serverTimestamp(),
+          updatedAt: window.fb.serverTimestamp(),
+        });
+      } else {
+        // 加入現有家庭：把自己加進 roster
+        const familyRef = window.fb.doc(window.fb.db, 'families', familyId);
+        const familySnap = await window.fb.getDoc(familyRef);
+        const existingRoster = (familySnap.exists() && familySnap.data().roster) || {};
+        const usedColors = Object.values(existingRoster).map(m => m.color);
+        const nextColor = MEMBER_COLORS.find(c => !usedColors.includes(c)) || MEMBER_COLORS[Object.keys(existingRoster).length % MEMBER_COLORS.length];
+        await window.fb.setDoc(familyRef, {
+          roster: { ...existingRoster, [cred.user.uid]: { name, color: nextColor } },
+          updatedAt: window.fb.serverTimestamp(),
+        }, { merge: true });
+      }
+
+      // 記錄使用者所屬的家庭空間 id，供下次登入直接讀取
+      await window.fb.setDoc(window.fb.doc(window.fb.db, 'users', cred.user.uid), {
+        familyId, name, email,
+      });
+      // onAuthStateChanged 會接手後續流程
+    } catch (err) {
+      showAuthError(friendlyAuthError(err));
+      btn.disabled = false; loading.classList.remove('show');
+    }
   });
+
+  document.getElementById('logoutBtn').addEventListener('click', async () => {
+    if (unsubscribeFamily) { unsubscribeFamily(); unsubscribeFamily = null; }
+    await window.fb.signOut(window.fb.auth);
+  });
+}
+
+async function handleSignedIn(user) {
+  currentUser = { uid: user.uid, email: user.email, displayName: user.displayName };
+  clearAuthError();
+  // 重置登入表單狀態，避免下次登出再登入時卡在 loading
+  const loginBtn = document.getElementById('loginSubmitBtn');
+  const loginLoading = document.getElementById('loginLoading');
+  const signupBtn = document.getElementById('signupSubmitBtn');
+  const signupLoading = document.getElementById('signupLoading');
+  if (loginBtn) { loginBtn.disabled = false; loginLoading.classList.remove('show'); }
+  if (signupBtn) { signupBtn.disabled = false; signupLoading.classList.remove('show'); }
+
+  try {
+    const userDoc = await window.fb.getDoc(window.fb.doc(window.fb.db, 'users', user.uid));
+    if (!userDoc.exists() || !userDoc.data().familyId) {
+      showAuthError('找不到你的家庭空間資料，請聯絡管理者或重新註冊');
+      await window.fb.signOut(window.fb.auth);
+      return;
+    }
+    currentFamilyId = userDoc.data().familyId;
+
+    const familyDoc = await window.fb.getDoc(window.fb.doc(window.fb.db, 'families', currentFamilyId));
+    if (familyDoc.exists()) {
+      document.getElementById('familyCodeDisplay').textContent = familyDoc.data().code || '------';
+    }
+
+    hideAuthScreen();
+    await listenFamily(currentFamilyId);
+    const t = activeTrip();
+    const today = todayISO();
+    state.currentItinDate = (t && today >= t.start && today <= t.end) ? today : (t ? t.start : today);
+    renderAll();
+    goScreen('dashboard');
+  } catch (err) {
+    console.error(err);
+    showAuthError('載入家庭空間時發生錯誤，請重新整理再試一次');
+  }
+}
+
+function handleSignedOut() {
+  currentUser = null;
+  currentFamilyId = null;
+  DB = null;
+  if (unsubscribeFamily) { unsubscribeFamily(); unsubscribeFamily = null; }
+  showAuthScreen();
+  document.getElementById('loginForm').reset();
+  document.getElementById('signupForm').reset();
 }
 
 /* ---------------- Init ---------------- */
 function init() {
-  DB = loadDB();
-  if (!DB.activeTrip && DB.trips.length) DB.activeTrip = DB.trips[0].id;
-  const t = activeTrip();
-  const today = todayISO();
-  state.currentItinDate = (t && today >= t.start && today <= t.end) ? today : (t ? t.start : today);
-  saveDB();
+  wireAuthEvents();
   wireEvents();
-  renderAll();
-  goScreen('dashboard');
+
+  window.fb.onAuthStateChanged(window.fb.auth, (user) => {
+    if (user) handleSignedIn(user);
+    else handleSignedOut();
+  });
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
 }
 
-document.addEventListener('DOMContentLoaded', init);
+function boot() {
+  if (window.fb) { init(); }
+  else { window.addEventListener('firebase-ready', init, { once: true }); }
+}
+
+document.addEventListener('DOMContentLoaded', boot);
