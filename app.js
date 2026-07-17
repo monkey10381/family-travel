@@ -3,7 +3,7 @@
    雲端同步版（Firebase Auth + Firestore）
    =========================================================== */
 
-const CATEGORIES = [
+const DEFAULT_CATEGORIES = [
   { id: 'food',      name: '餐飲', icon: '🍜', color: '#C17654' },
   { id: 'transport', name: '交通', icon: '🚄', color: '#5B7C8D' },
   { id: 'stay',      name: '住宿', icon: '🏨', color: '#7A8C5E' },
@@ -11,6 +11,10 @@ const CATEGORIES = [
   { id: 'ticket',    name: '門票', icon: '🎫', color: '#9C7AA8' },
   { id: 'other',     name: '其他', icon: '✦',  color: '#8B8378' },
 ];
+
+// 自訂分類可挑選的圖示（顏色從 CUSTOM_CAT_COLORS 依序自動指派，避免與現有分類重複）
+const CUSTOM_CAT_ICONS = ['🎁', '💊', '🐾', '🎨', '📷', '🏖️', '⛽', '🧴', '🎮', '🍺', '📱', '🧳'];
+const CUSTOM_CAT_COLORS = ['#D98E73', '#6E8FA0', '#8FA377', '#C29A73', '#A98AB5', '#7A9B9E', '#B98470', '#8C9C6B'];
 
 const MEMBER_COLORS = ['#C17654', '#5B7C8D', '#7A8C5E', '#B08968', '#9C7AA8', '#2C3E35'];
 
@@ -37,6 +41,7 @@ function emptyDB() {
     activeTrip: null,
     expenses: [],
     itinerary: [],
+    customCategories: [], // 家庭自訂支出分類，格式同 DEFAULT_CATEGORIES 的項目
   };
 }
 
@@ -77,6 +82,7 @@ function listenFamily(familyId) {
       const remote = snap.data();
       isApplyingRemoteUpdate = true;
       DB = remote.data || emptyDB();
+      if (!DB.customCategories) DB.customCategories = []; // 相容舊資料
       if (!DB.activeTrip && DB.trips.length) DB.activeTrip = DB.trips[0].id;
       syncMembersFromRoster(remote.roster || {});
       isApplyingRemoteUpdate = false;
@@ -106,7 +112,13 @@ function syncMembersFromRoster(roster) {
 /* ---------------- Helpers ---------------- */
 function uid() { return Math.random().toString(36).slice(2, 10); }
 function fmtMoney(n) { return 'NT$ ' + Math.round(n).toLocaleString('zh-Hant'); }
-function getCat(id) { return CATEGORIES.find(c => c.id === id) || CATEGORIES[CATEGORIES.length - 1]; }
+function allCategories() {
+  return [...DEFAULT_CATEGORIES, ...(DB && DB.customCategories ? DB.customCategories : [])];
+}
+function getCat(id) {
+  const all = allCategories();
+  return all.find(c => c.id === id) || DEFAULT_CATEGORIES[DEFAULT_CATEGORIES.length - 1];
+}
 function getMember(id) { return DB.members.find(m => m.id === id); }
 function activeTrip() { return DB.trips.find(t => t.id === DB.activeTrip) || DB.trips[0]; }
 function tripExpenses() {
@@ -207,6 +219,8 @@ function renderDashboard() {
     }).join('');
   }
 
+  renderCategoryCharts(sortedCats, total);
+
   // who row
   const whoTotals = {};
   exps.forEach(e => { whoTotals[e.paidBy] = (whoTotals[e.paidBy] || 0) + e.amount; });
@@ -231,6 +245,60 @@ function renderDashboard() {
   } else {
     todayEl.innerHTML = `<div class="timeline">` + items.map(i => itinCardHtml(i, false)).join('') + `</div>`;
   }
+}
+
+function renderCategoryCharts(sortedCats, total) {
+  const pieEl = document.getElementById('pieChartCanvas');
+  const legendEl = document.getElementById('pieLegend');
+  const barEl = document.getElementById('barChartCanvas');
+
+  if (!sortedCats.length || !total) {
+    pieEl.style.background = 'var(--cream-2)';
+    legendEl.innerHTML = `<div style="font-size:12.5px; color:var(--warmgray); text-align:center;">還沒有支出資料</div>`;
+    barEl.innerHTML = `<div style="font-size:12.5px; color:var(--warmgray); text-align:center;">還沒有支出資料</div>`;
+    return;
+  }
+
+  // 圓餅圖：用 conic-gradient 疊出扇形，不需額外圖表函式庫
+  let acc = 0;
+  const stops = sortedCats.map(([catId, amt]) => {
+    const cat = getCat(catId);
+    const pct = (amt / total) * 100;
+    const from = acc;
+    const to = acc + pct;
+    acc = to;
+    return `${cat.color} ${from}% ${to}%`;
+  });
+  pieEl.style.background = `conic-gradient(${stops.join(', ')})`;
+
+  legendEl.innerHTML = sortedCats.map(([catId, amt]) => {
+    const cat = getCat(catId);
+    const pct = Math.round((amt / total) * 100);
+    return `
+      <div class="pie-legend-row">
+        <div class="pie-legend-dot" style="background:${cat.color};"></div>
+        <span class="name">${cat.icon} ${cat.name}</span>
+        <span class="pct">${pct}%</span>
+        <span class="amt">${fmtMoney(amt)}</span>
+      </div>`;
+  }).join('');
+
+  // 長條圖：依金額由大到小排列
+  const maxAmt = sortedCats[0][1];
+  barEl.innerHTML = sortedCats.map(([catId, amt]) => {
+    const cat = getCat(catId);
+    const widthPct = maxAmt ? Math.round((amt / maxAmt) * 100) : 0;
+    return `
+      <div class="bar-chart-row">
+        <div class="top">
+          <span class="name">${cat.icon} ${cat.name}</span>
+          <span class="amt">${fmtMoney(amt)}</span>
+        </div>
+        <div class="bar-chart-track">
+          <div class="bar-chart-fill" style="width:${widthPct}%; background:${cat.color};"></div>
+        </div>
+      </div>`;
+  }).join('');
 }
 
 function renderLedger() {
@@ -469,17 +537,39 @@ function closeModal(id) { document.getElementById(id).classList.remove('active')
 
 function buildCatGrid(selectedCat) {
   const el = document.getElementById('expCatGrid');
-  const sel = selectedCat || CATEGORIES[0].id;
-  el.innerHTML = CATEGORIES.map((c) => `
+  const cats = allCategories();
+  const sel = selectedCat || cats[0].id;
+  el.innerHTML = cats.map((c) => `
     <button type="button" class="cat-pick ${c.id === sel ? 'sel' : ''}" data-cat="${c.id}">
       <span class="ic">${c.icon}</span>${c.name}
-    </button>`).join('');
-  el.querySelectorAll('.cat-pick').forEach(btn => {
+    </button>`).join('') + `
+    <button type="button" class="cat-pick" id="catAddNewBtn" style="color:var(--clay); border-style:dashed;">
+      <span class="ic">＋</span>新增分類
+    </button>`;
+  el.querySelectorAll('.cat-pick[data-cat]').forEach(btn => {
     btn.addEventListener('click', () => {
       el.querySelectorAll('.cat-pick').forEach(b => b.classList.remove('sel'));
       btn.classList.add('sel');
     });
   });
+  document.getElementById('catAddNewBtn').addEventListener('click', openNewCategoryModal);
+}
+
+function openNewCategoryModal() {
+  document.getElementById('newCatName').value = '';
+  const iconRow = document.getElementById('newCatIconRow');
+  iconRow.innerHTML = CUSTOM_CAT_ICONS.map((ic, idx) => `
+    <button type="button" class="cat-pick ${idx === 0 ? 'sel' : ''}" data-icon="${ic}">
+      <span class="ic">${ic}</span>
+    </button>`).join('');
+  iconRow.querySelectorAll('.cat-pick').forEach(btn => {
+    btn.addEventListener('click', () => {
+      iconRow.querySelectorAll('.cat-pick').forEach(b => b.classList.remove('sel'));
+      btn.classList.add('sel');
+    });
+  });
+  openModal('newCategoryModal');
+  setTimeout(() => document.getElementById('newCatName').focus(), 300);
 }
 
 function buildWhoRow(selectedWho) {
@@ -549,6 +639,15 @@ function wireEvents() {
     btn.addEventListener('click', () => goScreen(btn.dataset.screen));
   });
 
+  document.getElementById('chartTabs').addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-chart]');
+    if (!btn) return;
+    document.querySelectorAll('#chartTabs button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('pieChartWrap').style.display = btn.dataset.chart === 'pie' ? '' : 'none';
+    document.getElementById('barChartWrap').style.display = btn.dataset.chart === 'bar' ? '' : 'none';
+  });
+
   document.getElementById('fabBtn').addEventListener('click', () => {
     if (state.currentScreen === 'itinerary') openItinModal();
     else openExpenseModal();
@@ -566,6 +665,27 @@ function wireEvents() {
     state.currentItinDate = activeTrip() ? activeTrip().start : todayISO();
     syncDB();
     renderAll();
+  });
+
+  document.getElementById('saveNewCatBtn').addEventListener('click', () => {
+    const name = document.getElementById('newCatName').value.trim();
+    const iconBtn = document.querySelector('#newCatIconRow .cat-pick.sel') || document.querySelector('#newCatIconRow .cat-pick');
+    if (!name) { showToast('請輸入分類名稱'); return; }
+    if (allCategories().some(c => c.name === name)) { showToast('已經有相同名稱的分類了'); return; }
+
+    const usedColors = allCategories().map(c => c.color);
+    const nextColor = CUSTOM_CAT_COLORS.find(c => !usedColors.includes(c)) || CUSTOM_CAT_COLORS[DB.customCategories.length % CUSTOM_CAT_COLORS.length];
+    const newCat = {
+      id: 'custom_' + uid(),
+      name,
+      icon: iconBtn ? iconBtn.dataset.icon : CUSTOM_CAT_ICONS[0],
+      color: nextColor,
+    };
+    DB.customCategories.push(newCat);
+    syncDB();
+    closeModal('newCategoryModal');
+    buildCatGrid(newCat.id); // 重建分類方格並自動選中新分類
+    showToast('已新增分類');
   });
 
   document.getElementById('saveExpenseBtn').addEventListener('click', () => {
