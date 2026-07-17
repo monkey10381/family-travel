@@ -955,7 +955,7 @@ function wireAuthEvents() {
       } else {
         // 加入現有家庭：把自己加進 roster
         const familyRef = window.fb.doc(window.fb.db, 'families', familyId);
-        const familySnap = await window.fb.getDoc(familyRef);
+        const familySnap = await window.fb.getDocFromServer(familyRef);
         const existingRoster = (familySnap.exists() && familySnap.data().roster) || {};
         const usedColors = Object.values(existingRoster).map(m => m.color);
         const nextColor = MEMBER_COLORS.find(c => !usedColors.includes(c)) || MEMBER_COLORS[Object.keys(existingRoster).length % MEMBER_COLORS.length];
@@ -970,9 +970,9 @@ function wireAuthEvents() {
         familyId, name, email,
       });
 
-      // 資料已完整寫入，現在才交給正式的登入流程接手
+      // 資料已完整寫入，現在才交給正式的登入流程接手（直接帶入剛拿到的 familyId，避免重新查詢時遇到快取延遲）
       isSigningUp = false;
-      await handleSignedIn(cred.user);
+      await handleSignedIn(cred.user, familyId);
     } catch (err) {
       isSigningUp = false;
       showAuthError(friendlyAuthError(err));
@@ -986,7 +986,7 @@ function wireAuthEvents() {
   });
 }
 
-async function handleSignedIn(user) {
+async function handleSignedIn(user, knownFamilyId) {
   currentUser = { uid: user.uid, email: user.email, displayName: user.displayName };
   clearAuthError();
   // 重置登入表單狀態，避免下次登出再登入時卡在 loading
@@ -998,18 +998,21 @@ async function handleSignedIn(user) {
   if (signupBtn) { signupBtn.disabled = false; signupLoading.classList.remove('show'); }
 
   try {
-    const userDoc = await window.fb.getDoc(window.fb.doc(window.fb.db, 'users', user.uid));
-    if (!userDoc.exists() || !userDoc.data().familyId) {
-      showAuthError('找不到你的家庭空間資料，請聯絡管理者或重新註冊');
-      await window.fb.signOut(window.fb.auth);
-      return;
-    }
-    currentFamilyId = userDoc.data().familyId;
+    let familyId = knownFamilyId;
 
-    const familyDoc = await window.fb.getDoc(window.fb.doc(window.fb.db, 'families', currentFamilyId));
-    if (familyDoc.exists()) {
-      document.getElementById('familyCodeDisplay').textContent = familyDoc.data().code || '------';
+    if (!familyId) {
+      // 一般登入：從 users/{uid} 讀取所屬家庭空間
+      // 用 getDocFromServer 強制跳過本地快取，避免讀到過期或空白的資料
+      const userDoc = await window.fb.getDocFromServer(window.fb.doc(window.fb.db, 'users', user.uid));
+      if (!userDoc.exists() || !userDoc.data().familyId) {
+        showAuthError('找不到你的家庭空間資料，請聯絡管理者或重新註冊');
+        await window.fb.signOut(window.fb.auth);
+        return;
+      }
+      familyId = userDoc.data().familyId;
     }
+
+    currentFamilyId = familyId;
 
     hideAuthScreen();
     await listenFamily(currentFamilyId);
@@ -1018,6 +1021,13 @@ async function handleSignedIn(user) {
     state.currentItinDate = (t && today >= t.start && today <= t.end) ? today : (t ? t.start : today);
     renderAll();
     goScreen('dashboard');
+
+    // 家庭代碼顯示可以晚一點補上，不影響主流程
+    window.fb.getDoc(window.fb.doc(window.fb.db, 'families', currentFamilyId)).then(familyDoc => {
+      if (familyDoc.exists()) {
+        document.getElementById('familyCodeDisplay').textContent = familyDoc.data().code || '------';
+      }
+    }).catch(() => {});
   } catch (err) {
     console.error(err);
     showAuthError(`載入家庭空間時發生錯誤（代碼：${(err && err.code) || (err && err.message) || '未知'}）`);
