@@ -535,6 +535,14 @@
     font-size:14.5px;
     color:var(--ink);
     outline:none;
+    -webkit-appearance:none;
+    appearance:none;
+    min-height:44px;
+    box-sizing:border-box;
+  }
+  .field input[type="date"], .field input[type="time"]{
+    -webkit-appearance:auto;
+    appearance:auto;
   }
   .field textarea{resize:vertical; min-height:60px;}
   .field input:focus, .field select:focus, .field textarea:focus{border-color:var(--clay);}

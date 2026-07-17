@@ -123,7 +123,9 @@ function tripDayCount() {
   return Math.max(1, diff || 1);
 }
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  const offset = d.getTimezoneOffset() * 60000; // 分鐘轉毫秒
+  return new Date(d.getTime() - offset).toISOString().slice(0, 10);
 }
 function fmtDateLabel(iso) {
   if (!iso) return '';
@@ -145,7 +147,10 @@ function fmtWeekShort(iso) {
 function addDaysISO(iso, n) {
   const d = new Date(iso + 'T00:00:00');
   d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function showToast(msg) {
