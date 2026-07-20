@@ -3,6 +3,11 @@
    雲端同步版（Firebase Auth + Firestore）
    =========================================================== */
 
+// 除錯用：任何未預期的錯誤直接彈窗顯示，方便在手機上排查（之後穩定了可以移除）
+window.addEventListener('error', (e) => {
+  alert('❗發生錯誤：\n' + (e.message || '未知') + '\n位置：' + (e.filename || '') + ':' + (e.lineno || '') + '\n' + (e.error && e.error.stack ? e.error.stack.split('\n').slice(0,3).join('\n') : ''));
+});
+
 const DEFAULT_CATEGORIES = [
   { id: 'food',      name: '餐飲', icon: '🍜', color: '#C17654' },
   { id: 'transport', name: '交通', icon: '🚄', color: '#5B7C8D' },
@@ -269,6 +274,7 @@ function renderCategoryCharts(sortedCats, total) {
     acc = to;
     return `${cat.color} ${from}% ${to}%`;
   });
+  pieEl.style.background = `-webkit-conic-gradient(${stops.join(', ')})`;
   pieEl.style.background = `conic-gradient(${stops.join(', ')})`;
 
   legendEl.innerHTML = sortedCats.map(([catId, amt]) => {
